@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Bulk Email Generator</title>
+<style>
+  :root{--bg1:#0b3d4f;--bg2:#063244;--card:rgba(255,255,255,0.08);--accent:#ff8040}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(135deg,var(--bg1),var(--bg2));color:#fff;min-height:100vh}
+  .wrap{width:95%;max-width:1100px;margin:28px auto;padding:22px;background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));border-radius:12px;box-shadow:0 6px 30px rgba(0,0,0,0.4)}
+  h1{margin:0 0 12px 0;font-size:22px}
+  .grid{display:grid;grid-template-columns:1fr 420px;gap:20px}
+  .card{background:var(--card);padding:16px;border-radius:10px}
+  label{display:block;font-size:13px;margin-bottom:6px;opacity:0.95}
+  input[type="text"], input[type="number"], select {width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);background:transparent;color:#fff;box-sizing:border-box}
+  .row{display:flex;gap:8px}
+  .small{width:120px}
+  .btn{background:var(--accent);border:none;padding:10px 12px;border-radius:8px;color:#fff;cursor:pointer;font-weight:700}
+  .btn:active{transform:translateY(1px)}
+  .controls{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .preview{max-height:520px;overflow:auto;margin-top:8px;background:rgba(0,0,0,0.2);padding:10px;border-radius:8px}
+  table{width:100%;border-collapse:collapse;color:#fff}
+  th,td{padding:8px 6px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:13px;text-align:left}
+  .muted{opacity:0.85;font-size:13px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .link{background:transparent;border:1px solid rgba(255,255,255,0.08);padding:8px 10px;border-radius:8px;color:#fff;cursor:pointer}
+  .note{font-size:13px;margin-top:10px;opacity:0.9}
+  @media(max-width:980px){.grid{grid-template-columns:1fr;}.small{width:100%}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>Bulk Email Generator</h1>
+      <div class="muted">Create email + password pairs and export as CSV for your listings.</div>
+    </div>
+    <div>
+      <button class="link" onclick="goBack()">← Back to Dashboard</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT: Generator UI -->
+    <div class="card">
+      <label>Prefix (before @)</label>
+      <input id="prefix" type="text" placeholder="e.g. player, guest, xuser" value="guest">
+
+      <label style="margin-top:10px">Domain</label>
+      <select id="domain">
+        <option value="example.com">example.com</option>
+        <option value="mail.com">mail.com</option>
+        <option value="tempmail.com">tempmail.com</option>
+        <option value="custom">Custom domain...</option>
+      </select>
+      <input id="customDomain" type="text" placeholder="yourdomain.com" style="display:none;margin-top:8px">
+
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <div style="flex:1">
+          <label>Count</label>
+          <input id="count" type="number" min="1" max="2000" value="10">
+        </div>
+        <div style="width:140px">
+          <label>Password length</label>
+          <input id="plen" type="number" min="6" max="32" value="10">
+        </div>
+      </div>
+
+      <label style="margin-top:10px">Password charset</label>
+      <div class="row" style="margin-top:6px">
+        <label style="display:flex;align-items:center;gap:8px"><input id="useLower" type="checkbox" checked> lowercase</label>
+        <label style="display:flex;align-items:center;gap:8px"><input id="useUpper" type="checkbox" checked> UPPER</label>
+        <label style="display:flex;align-items:center;gap:8px"><input id="useDigits" type="checkbox" checked> digits</label>
+        <label style="display:flex;align-items:center;gap:8px"><input id="useSymbols" type="checkbox"> symbols</label>
+      </div>
+
+      <div class="controls">
+        <button class="btn" onclick="generate()">Generate</button>
+        <button class="btn" onclick="downloadCSV()">Download CSV</button>
+        <button class="link" onclick="clearPreview()">Clear</button>
+      </div>
+
+      <div class="note">
+        Tip: Use a unique prefix & domain to avoid collisions. For real ops, store credentials in a secure database and never expose plaintext widely.
+      </div>
+    </div>
+
+    <!-- RIGHT: Preview -->
+    <div class="card">
+      <label>Preview (email : password)</label>
+      <div id="preview" class="preview">
+        <table id="resultTable">
+          <thead><tr><th>#</th><th>Email</th><th>Password</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="copyToClipboard()">Copy to clipboard</button>
+        <button class="link" onclick="selectAllRows()">Select all rows</button>
+      </div>
+
+      <div style="margin-top:10px" id="stats" class="muted">0 accounts</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // helpers
+  function goBack(){ location.href = 'admin-dashboard.html' }
+
+  const previewBody = document.querySelector('#resultTable tbody');
+  let currentList = [];
+
+  document.getElementById('domain').addEventListener('change', (e)=>{
+    if(e.target.value === 'custom') document.getElementById('customDomain').style.display='block';
+    else document.getElementById('customDomain').style.display='none';
+  });
+
+  function generate() {
+    const prefix = (document.getElementById('prefix').value || 'user').trim();
+    let domain = document.getElementById('domain').value;
+    const custom = document.getElementById('customDomain').value.trim();
+    if(domain === 'custom'){
+      if(!custom){ alert('Enter a custom domain'); return; }
+      domain = custom;
+    }
+
+    const count = clamp(parseInt(document.getElementById('count').value,10) || 1, 1, 2000);
+    const plen = clamp(parseInt(document.getElementById('plen').value,10) || 8, 6, 32);
+
+    // charset
+    let chars = '';
+    if(document.getElementById('useLower').checked) chars += 'abcdefghijklmnopqrstuvwxyz';
+    if(document.getElementById('useUpper').checked) chars += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    if(document.getElementById('useDigits').checked) chars += '0123456789';
+    if(document.getElementById('useSymbols').checked) chars += '!@#$%&*()_-+=';
+    if(!chars){ alert('Select at least one password charset'); return; }
+
+    // generate list
+    currentList = [];
+    for(let i=0;i<count;i++){
+      // simple unique suffix: prefix + random short token + index
+      const token = randString(4, 'abcdefghijklmnopqrstuvwxyz0123456789');
+      const local = `${prefix}${token}${i+1}`;
+      const email = `${local}@${domain}`;
+      const pass = randString(plen, chars);
+      currentList.push({email, pass});
+    }
+
+    renderPreview();
+  }
+
+  function renderPreview(){
+    previewBody.innerHTML = '';
+    currentList.forEach((r, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.pass)}</td>`;
+      previewBody.appendChild(tr);
+    });
+    document.getElementById('stats').textContent = `${currentList.length} accounts`;
+  }
+
+  function downloadCSV(){
+    if(!currentList.length){ alert('No accounts to download — generate first.'); return; }
+    let csv = 'email,password\n';
+    currentList.forEach(r => {
+      // wrap values in quotes if needed
+      csv += `"${r.email.replace(/"/g,'""')}","${r.pass.replace(/"/g,'""')}"\n`;
+    });
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const time = new Date().toISOString().replace(/[:.]/g,'-');
+    a.download = `generated-emails-${time}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function copyToClipboard(){
+    if(!currentList.length){ alert('No accounts to copy'); return; }
+    const txt = currentList.map(r=>`${r.email} : ${r.pass}`).join('\n');
+    navigator.clipboard.writeText(txt).then(()=> alert('Copied to clipboard'), ()=> alert('Copy failed'));
+  }
+
+  function clearPreview(){ currentList = []; renderPreview(); }
+
+  function selectAllRows(){
+    // helper: selects table text for easy copy (works in most browsers)
+    const range = document.createRange();
+    range.selectNode(document.getElementById('resultTable'));
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // utility functions
+  function randString(len, chars){
+    let out = '';
+    const cl = chars.length;
+    // crypto-safe generation if available:
+    if(window.crypto && window.crypto.getRandomValues){
+      const arr = new Uint32Array(len);
+      window.crypto.getRandomValues(arr);
+      for(let i=0;i<len;i++) out += chars[arr[i] % cl];
+    } else {
+      for(let i=0;i<len;i++) out += chars[Math.floor(Math.random()*cl)];
+    }
+    return out;
+  }
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+  function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+</script>
+</body>
+</html>
